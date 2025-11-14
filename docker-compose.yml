@@ -1,0 +1,180 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: ticketstore-postgres
+    environment:
+      POSTGRES_DB: ticketstore
+      POSTGRES_USER: ticketstore_user
+      POSTGRES_PASSWORD: ticketstore_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - ticketstore-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ticketstore_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: ticketstore-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - ticketstore-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend Instance 1
+  backend-1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ticketstore-backend-1
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ticketstore
+      SPRING_DATASOURCE_USERNAME: ticketstore_user
+      SPRING_DATASOURCE_PASSWORD: ticketstore_pass
+      SPRING_DATA_REDIS_HOST: redis
+      SERVER_PORT: 8080
+      INSTANCE_NAME: backend-1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ticketstore-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend.rule=PathPrefix(`/api`) || PathPrefix(`/actuator`)"
+      - "traefik.http.services.backend.loadbalancer.server.port=8080"
+      - "traefik.http.services.backend.loadbalancer.healthcheck.path=/actuator/health"
+      - "traefik.http.services.backend.loadbalancer.healthcheck.interval=10s"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Backend Instance 2
+  # backend-2:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: ticketstore-backend-2
+  #   environment:
+  #     SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ticketstore
+  #     SPRING_DATASOURCE_USERNAME: ticketstore_user
+  #     SPRING_DATASOURCE_PASSWORD: ticketstore_pass
+  #     SPRING_DATA_REDIS_HOST: redis
+  #     SERVER_PORT: 8080
+  #     INSTANCE_NAME: backend-2
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   networks:
+  #     - ticketstore-network
+  #   labels:
+  #     - "traefik.enable=true"
+  #     - "traefik.http.routers.backend.rule=PathPrefix(`/api`) || PathPrefix(`/actuator`)"
+  #     - "traefik.http.services.backend.loadbalancer.server.port=8080"
+  #     - "traefik.http.services.backend.loadbalancer.healthcheck.path=/actuator/health"
+  #     - "traefik.http.services.backend.loadbalancer.healthcheck.interval=10s"
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 60s
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ticketstore-frontend
+    ports:
+      - "3000:80"
+    networks:
+      - ticketstore-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"
+      - "traefik.http.services.frontend.loadbalancer.server.port=80"
+
+  # Traefik Load Balancer
+  traefik:
+    image: traefik:v2.10
+    container_name: ticketstore-traefik
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--log.level=INFO"
+    ports:
+      - "80:80"
+      - "8081:8080"  # Traefik Dashboard
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - ticketstore-network
+
+  # Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ticketstore-prometheus
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    ports:
+      - "9090:9090"
+    networks:
+      - ticketstore-network
+    depends_on:
+      - backend-1
+      # - backend-2
+
+  # Grafana
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ticketstore-grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3001:3000"
+    networks:
+      - ticketstore-network
+    depends_on:
+      - prometheus
+
+networks:
+  ticketstore-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  prometheus_data:
+  grafana_data:

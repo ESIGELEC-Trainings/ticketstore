@@ -1,0 +1,29 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'ticketstore-monitor'
+
+scrape_configs:
+  # Backend Instance 1
+  - job_name: 'backend-1'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['backend-1:8080']
+        labels:
+          instance: 'backend-1'
+          team: 'default'
+
+  # Backend Instance 2
+  - job_name: 'backend-2'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['backend-2:8080']
+        labels:
+          instance: 'backend-2'
+          team: 'default'
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
