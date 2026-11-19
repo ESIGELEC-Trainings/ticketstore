@@ -8,6 +8,9 @@ import org.springframework.stereotype.Service;
 
 import com.ticketstore.entity.Event;
 import com.ticketstore.repository.EventRepository;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.cache.annotation.Cacheable; 
 
 @Service
 public class EventService {
@@ -18,10 +21,10 @@ public class EventService {
 		this.eventRepository = eventRepository;
 	}
 
-	public List<Event> getAllEvents() {
-		List<Event> events = eventRepository.findAll();
-		events.forEach(e -> e.getTitle());
-		return events;
+	@Cacheable(value = "events", key = "#page + '-' + #size")
+	public List<Event> getAllEvents(int page, int size) {
+    Pageable pageable = PageRequest.of(page, size);
+    return eventRepository.findAll(pageable).getContent();
 	}
 
 	public Optional<Event> getEventDetails(UUID id) {
