@@ -1,0 +1,2 @@
+# Les scripts shell doivent rester en fins de ligne Unix (LF), même édités sous Windows
+*.sh text eol=lf
